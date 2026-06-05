@@ -1,0 +1,73 @@
+# drone-swarm-fault-detector — default configuration
+# AGPL-3.0  |  https://github.com/yourorg/drone-swarm-fault-detector
+
+swarm:
+  n_drones: 20
+  seed: 42
+
+mission:
+  waypoints:
+    - [0.0,   0.0,   0.0]   # WP0  (start)
+    - [500.0, 300.0, 80.0]  # WP1  (target)
+  update_interval_sec: 5    # simulated seconds between steps
+
+simulation:
+  n_steps: 10
+
+fault_injection:
+  # Forced single-drone fault for reproducible training data
+  forced_drone_id: 7
+  forced_fault_step: 4      # fault begins at this step (0-indexed)
+  forced_fault_type: drift  # drift | comm_degraded | comm_blackout | gps_noise | battery_sudden
+
+  # Background random fault probability per drone per step
+  random_fault_prob: 0.001
+
+physics:
+  normal_speed: 12.0         # m/step
+  fault_drift_speed: 35.0    # m/step (drift fault)
+  max_comm_range: 800.0      # metres
+
+  # Battery drain per step (uniform sample from [min, max])
+  battery_drain_normal:  [0.004, 0.008]
+  battery_drain_fault:   [0.001, 0.003]
+  battery_sudden_drop:   [0.10,  0.25]   # battery_sudden fault
+  battery_init_range:    [0.85,  1.00]
+
+  # GPS noise fault: position jitter in metres (std dev per axis)
+  gps_noise_std: 30.0
+
+comm:
+  # Ping strength noise (uniform jitter added to distance-based value)
+  ping_jitter: 0.03
+  # Faulty-link ping multiplier  (drawn from uniform [min, max])
+  fault_ping_scale: [0.03, 0.18]
+  # comm_degraded: ping multiplier (drawn from uniform [min, max])
+  degraded_ping_scale: [0.30, 0.60]
+  # comm_degraded: extra latency ms (uniform)
+  degraded_latency_extra: [50, 150]
+  # comm_blackout: edge is fully removed (no row in edges table)
+  blackout: true
+
+weights:
+  # Edge scoring weights for cuGraph input
+  ping_strength:    0.2
+  gps_distance:    -0.5
+  waypoint_distance: -0.9
+  battery:          0.9
+  fault_status:   -10.0
+  mission_complete: 0.7
+  delta_time:      -0.2
+
+  scaler: scale_and_round   # scale_and_round | retain_float | normalize_range | log_transform
+  scale_factor: 1000
+
+graph:
+  # How many most-recent steps to include in the Louvain/PageRank graph.
+  # Using all steps keeps stale edges from drones that left comm range.
+  # 0 = use all steps (cumulative).
+  window_steps: 5
+
+output:
+  snapshots_path: data/drone_snapshots.parquet
+  edges_path:     data/drone_edges.parquet
