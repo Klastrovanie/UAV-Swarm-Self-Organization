@@ -106,18 +106,50 @@ A drone with `suspicion_score ≥ 1` is reported as a suspected fault.
 whereas low PageRank can arise from transient edge degradation.
 
 ---
-
-## Leader election
-
+ 
+## Why leader election matters
+ 
+Without an elected leader per sub-cluster, the ground control station (GCS) must maintain a direct communication link to every drone in the swarm. For a swarm of N drones this is **O(N) links**, each consuming bandwidth, RF spectrum, and CPU on the GCS side. It also exposes every drone as a potential point of communication failure with the GCS.
+ 
+With leader election, the GCS only needs to talk to **one leader per community**:
+ 
+```
+Without leader election               With leader election
+─────────────────────────             ─────────────────────────
+       GCS                                    GCS
+      /│\\..\\                                 │
+     / │ \\ ..\\                               │  (1 link)
+    /  │  \\  .\\                              ▼
+   ▼   ▼   ▼   ▼                              Leader
+  D1  D2  D3 ... DN                          / │ \\
+                                            ▼  ▼  ▼   (intra-cluster mesh)
+                                           D1 D2 D3      
+   O(N) GCS links                          O(1) GCS link per cluster
+```
+ 
+Concrete benefits:
+ 
+- **Bandwidth reduction**: GCS uplink/downlink scales with number of clusters, not drones. For a 40-drone swarm split into 2 clusters, GCS communication drops from 40 links to 2.
+- **Resilience**: if a single drone loses its link to the GCS, only that one drone is affected — the leader still relays for the rest of the cluster.
+- **Lower latency for swarm-internal coordination**: intra-cluster messages stay local instead of round-tripping through the GCS.
+- **GPS/RF spectrum efficiency**: fewer simultaneous GCS-to-drone channels reduces interference.
+- **Automatic failover**: when a leader itself fails, the next PageRank run elects a new one without GCS intervention.
+This is the same architectural pattern used in cellular networks (cluster head / sector controller) and Byzantine consensus protocols (leader-based replication), adapted for ad-hoc UAV mesh networks where the leader can change every few seconds based on current topology.
+ 
+---
+ 
+## How leader election works
+ 
 After Louvain partitioning, the drone with the **highest PageRank** in each community is elected as the community leader.
-
-PageRank in this context measures how many high-quality communication links a drone has, weighted by the quality of its neighbours' links in turn. A leader drone is:
-
+ 
+PageRank in this context measures how many high-quality communication links a drone has, weighted by the quality of its neighbours' links in turn. A leader drone tends to be:
+ 
 - Centrally positioned in its sub-cluster (low average GPS distance to peers)
 - Reachable with low latency and high ping strength from most community members
-- Operating with healthy battery
-
-Leaders are reported per community and can serve as relay nodes or sub-swarm coordinators after the main swarm splits due to a fault event.
+- Operating with healthy battery (which influences edge weight)
+Because the edge weights incorporate ping strength, latency, GPS distance, and battery, the elected leader is automatically the drone best suited to act as a relay — both physically (central position) and operationally (healthy state).
+ 
+Leaders are reported per community every timestep, so when the swarm splits or merges due to a fault event, the leader set updates automatically without any external coordination.
 
 ---
 
