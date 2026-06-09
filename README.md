@@ -482,7 +482,7 @@ Top bar shows **● Server Connected** when the API is reachable. Use ⚙ Config
 ## Live Demo Video Recording:
 [![UAV Swarm Self-Organization Demo](https://img.youtube.com/vi/h7SSGxUz5Nc/0.jpg)](https://youtu.be/h7SSGxUz5Nc)
 
-https://youtu.be/h7SSGxUz5Nc
+https://www.youtube.com/watch?v=B0FfCWOXL8M 
 
 
 ---
