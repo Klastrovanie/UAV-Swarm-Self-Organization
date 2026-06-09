@@ -1,0 +1,775 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>UAV Swarm — Live Mission Visualizer</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;600;700&display=swap');
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#060e14;color:#c8e6f0;font-family:'Share Tech Mono',monospace;overflow:hidden;width:100vw;height:100vh}
+#c{position:absolute;inset:0;cursor:grab}
+#c:active{cursor:grabbing}
+
+/* ── TOP BAR ── */
+.topbar{position:absolute;top:0;left:0;right:0;height:50px;background:rgba(3,12,20,0.95);border-bottom:1px solid rgba(0,200,160,0.15);display:flex;align-items:center;padding:0 18px;gap:16px;z-index:30;pointer-events:none}
+.topbar h1{font-family:'Rajdhani',sans-serif;font-size:17px;font-weight:700;letter-spacing:3px;color:#00d4a8;text-transform:uppercase}
+.topbar .sub{font-size:10px;color:rgba(0,212,168,0.4);letter-spacing:1.5px}
+.pulse{width:7px;height:7px;border-radius:50%;background:#00d4a8;flex-shrink:0;animation:blink 1.5s ease-in-out infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.2}}
+.step-badge{background:rgba(0,212,168,0.08);border:1px solid rgba(0,212,168,0.28);border-radius:3px;padding:3px 10px;font-size:11px;color:#00d4a8;margin-left:auto;pointer-events:none}
+#server-status{font-size:10px;padding:3px 10px;border-radius:3px;pointer-events:none}
+#server-status.ok{background:rgba(0,212,168,0.1);border:1px solid rgba(0,212,168,0.3);color:#00d4a8}
+#server-status.err{background:rgba(255,60,70,0.1);border:1px solid rgba(255,60,70,0.3);color:#ff6677}
+#server-status.warn{background:rgba(255,180,0,0.1);border:1px solid rgba(255,180,0,0.3);color:#ffcc44}
+
+/* ── LEFT PANEL ── */
+.lpanel{position:absolute;top:58px;left:0;width:236px;padding:10px 13px;background:linear-gradient(90deg,rgba(3,10,20,0.95) 72%,transparent);z-index:20;pointer-events:none}
+.sec{margin-bottom:12px;padding-left:9px;border-left:2px solid rgba(0,212,168,0.22)}
+.sec-lbl{font-size:9px;letter-spacing:2.5px;color:rgba(0,212,168,0.42);margin-bottom:6px;text-transform:uppercase}
+.gl-card{background:rgba(255,140,0,0.07);border:1px solid rgba(255,140,0,0.32);border-radius:4px;padding:7px 10px;margin-bottom:4px}
+.gl-id{font-family:'Rajdhani',sans-serif;font-size:21px;font-weight:700;color:#ff8c00}
+.gl-sub{font-size:10px;color:rgba(255,140,0,0.6);margin-top:1px}
+.cl-card{border:1px solid rgba(255,255,255,0.08);border-radius:3px;padding:6px 8px;margin-bottom:4px}
+.cl-comm{font-size:9px;letter-spacing:1.5px;margin-bottom:2px;font-weight:600}
+.cl-id{font-family:'Rajdhani',sans-serif;font-size:15px;font-weight:700;color:#ff8c00}
+.cl-meta{font-size:10px;color:rgba(200,230,240,0.4);margin-top:1px}
+.mis-row{font-size:11px;color:rgba(200,230,240,0.6);line-height:2.1}
+
+/* ── RIGHT PANEL ── */
+.rpanel{position:absolute;top:58px;right:0;width:206px;padding:10px 13px;background:linear-gradient(270deg,rgba(3,10,20,0.95) 72%,transparent);z-index:20;pointer-events:none}
+.fault-list{display:flex;flex-direction:column;gap:3px;max-height:420px;overflow:hidden}
+.fe{font-size:10px;padding:3px 7px;border-radius:3px;border-left:2px solid transparent;line-height:1.6}
+.fe.fault_detected,.fe.manual_inject{border-color:#ffaa00;background:rgba(255,170,0,0.06);color:#ffcc66}
+.fe.comm_blackout{border-color:#ff4455;background:rgba(255,60,70,0.06);color:#ff8899}
+.fe.recovered{border-color:rgba(0,212,168,0.4);background:rgba(0,212,168,0.04);color:rgba(0,212,168,0.75)}
+.fe.leader_stepdown{border-color:#cc99ff;background:rgba(170,130,255,0.06);color:#dd99ff}
+.fe.waypoint{border-color:#44e89a;background:rgba(68,232,154,0.06);color:#44e89a}
+
+/* ── BOTTOM BAR ── */
+.bbar{position:absolute;bottom:0;left:0;right:0;height:46px;background:rgba(3,12,20,0.95);border-top:1px solid rgba(0,200,160,0.1);display:flex;align-items:center;padding:0 22px;gap:30px;z-index:30;pointer-events:none}
+.mt{display:flex;flex-direction:column;gap:1px}
+.ml{font-size:9px;letter-spacing:2px;color:rgba(0,212,168,0.38);text-transform:uppercase}
+.mv{font-family:'Rajdhani',sans-serif;font-size:18px;font-weight:700;color:#00d4a8}
+.mv.o{color:#ff8c00}.mv.r{color:#ff4455}.mv.b{color:#4ab0ff}.mv.sm{font-size:12px}
+
+/* ── CONTROLS ── */
+.ctrl{position:absolute;bottom:54px;left:50%;transform:translateX(-50%);display:flex;gap:8px;z-index:35;pointer-events:all}
+.btn{padding:5px 15px;background:rgba(0,212,168,0.06);border:1px solid rgba(0,212,168,0.26);color:#00d4a8;font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:1px;cursor:pointer;border-radius:3px;transition:all .2s;text-transform:uppercase}
+.btn:hover{background:rgba(0,212,168,0.13);border-color:rgba(0,212,168,0.55)}
+.btn.on{background:rgba(0,212,168,0.17);border-color:#00d4a8}
+.btn.red{border-color:rgba(255,60,70,0.35);color:#ff6677}
+.btn.red:hover{background:rgba(255,60,70,0.1)}
+
+/* ── ALGO SWITCHER ── */
+.abar{position:absolute;top:58px;left:50%;transform:translateX(-50%);display:flex;z-index:35;pointer-events:all}
+.ab{padding:4px 13px;background:rgba(3,12,20,0.9);border:1px solid rgba(0,212,168,0.18);color:rgba(0,212,168,0.45);font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:1px;cursor:pointer;transition:all .2s;text-transform:uppercase}
+.ab:first-child{border-radius:3px 0 0 3px}
+.ab:last-child{border-radius:0 3px 3px 0}
+.ab.on{background:rgba(0,212,168,0.13);border-color:#00d4a8;color:#00d4a8}
+
+/* ── CONFIG PANEL ── */
+.cfg-panel{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(3,12,20,0.97);border:1px solid rgba(0,212,168,0.3);border-radius:6px;padding:22px 26px;z-index:50;width:340px;display:none}
+.cfg-panel h2{font-family:'Rajdhani',sans-serif;font-size:16px;font-weight:700;color:#00d4a8;letter-spacing:2px;margin-bottom:16px;text-transform:uppercase}
+.cfg-row{display:flex;flex-direction:column;gap:3px;margin-bottom:12px}
+.cfg-row label{font-size:10px;letter-spacing:1.5px;color:rgba(0,212,168,0.55);text-transform:uppercase}
+.cfg-row input,.cfg-row select{background:rgba(0,212,168,0.05);border:1px solid rgba(0,212,168,0.2);color:#c8e6f0;font-family:'Share Tech Mono',monospace;font-size:11px;padding:5px 8px;border-radius:3px;outline:none}
+.cfg-row input:focus,.cfg-row select:focus{border-color:rgba(0,212,168,0.5)}
+.cfg-row select option{background:#060e14;color:#c8e6f0}
+.cfg-btns{display:flex;gap:8px;margin-top:16px}
+
+/* ── INJECT PANEL ── */
+.inj-panel{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(3,12,20,0.97);border:1px solid rgba(255,100,0,0.35);border-radius:6px;padding:20px 24px;z-index:50;width:300px;display:none}
+.inj-panel h2{font-family:'Rajdhani',sans-serif;font-size:15px;font-weight:700;color:#ff8c00;letter-spacing:2px;margin-bottom:14px}
+
+/* ── LEGEND ── */
+.legend{position:absolute;bottom:54px;right:14px;z-index:25;display:flex;flex-direction:column;gap:4px;pointer-events:none}
+.lr{display:flex;align-items:center;gap:6px;font-size:10px;color:rgba(200,230,240,0.5)}
+.ld{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+</style>
+</head>
+<body>
+<div id="c"></div>
+
+<!-- TOP BAR -->
+<div class="topbar">
+  <div class="pulse" id="pulse"></div>
+  <div>
+    <h1>UAV Swarm — Live Mission</h1>
+    <div class="sub">Decentralised Self-Organisation · Real-Time Leader Election</div>
+  </div>
+  <div id="server-status" class="warn">Connecting…</div>
+  <div class="step-badge" id="step-badge">Step — / —</div>
+</div>
+
+<!-- ALGO BAR -->
+<div class="abar">
+  <button class="ab on" id="ab-pr" onclick="switchAlgo('louvain','pagerank',this)">Louvain + PageRank</button>
+  <button class="ab" id="ab-hi" onclick="switchAlgo('leiden','hits',this)">Leiden + HITS</button>
+</div>
+
+<!-- LEFT PANEL -->
+<div class="lpanel">
+  <div class="sec">
+    <div class="sec-lbl">Global Leader</div>
+    <div class="gl-card">
+      <div class="gl-id" id="ui-gl-id">—</div>
+      <div class="gl-sub" id="ui-gl-score">Awaiting data…</div>
+    </div>
+  </div>
+  <div class="sec" id="ui-comm-block"></div>
+  <div class="sec">
+    <div class="sec-lbl">Mission Path</div>
+    <div class="mis-row" id="ui-mission-path"></div>
+  </div>
+  <div class="sec">
+    <div class="sec-lbl">Network</div>
+    <div class="mis-row" id="ui-net"></div>
+  </div>
+</div>
+
+<!-- RIGHT PANEL -->
+<div class="rpanel">
+  <div class="sec-lbl" style="padding-left:9px;border-left:2px solid rgba(0,212,168,0.22);margin-bottom:8px">Event Log</div>
+  <div class="fault-list" id="ui-event-log"></div>
+</div>
+
+<!-- BOTTOM BAR -->
+<div class="bbar">
+  <div class="mt"><div class="ml">Active</div><div class="mv" id="ui-active">—</div></div>
+  <div class="mt"><div class="ml">Faulty</div><div class="mv r" id="ui-faulty">—</div></div>
+  <div class="mt"><div class="ml">Communities</div><div class="mv b" id="ui-comm-n">—</div></div>
+  <div class="mt"><div class="ml">Modularity</div><div class="mv sm" id="ui-mod">—</div></div>
+  <div class="mt"><div class="ml">Battery avg</div><div class="mv sm o" id="ui-batt">—</div></div>
+  <div class="mt"><div class="ml">Phase</div><div class="mv sm" id="ui-phase">—</div></div>
+</div>
+
+<!-- CONTROLS -->
+<div class="ctrl">
+  <button class="btn on" id="btn-pp" onclick="togglePlay()">⏸ Pause</button>
+  <button class="btn" onclick="showCfg()">⚙ Config</button>
+  <button class="btn red" onclick="showInject()">⚡ Inject Fault</button>
+  <button class="btn" onclick="resetMission()">↺ Reset</button>
+</div>
+
+<!-- LEGEND -->
+<div class="legend">
+  <div class="lr"><div class="ld" style="background:#ff8c00;box-shadow:0 0 6px #ff8c00aa"></div>Global Leader (orange)</div>
+  <div class="lr"><div class="ld" style="background:#ffffff;box-shadow:0 0 4px #ffffff88"></div>Community Leader (white)</div>
+  <div class="lr"><div class="ld" style="background:#4ab0ff"></div>Community A</div>
+  <div class="lr"><div class="ld" style="background:#44e89a"></div>Community B</div>
+  <div class="lr"><div class="ld" style="background:#cc99ff"></div>Community C</div>
+  <div class="lr"><div class="ld" style="background:#ffdd44"></div>Community D</div>
+  <div class="lr"><div class="ld" style="background:#ff4455"></div>Fault / Isolated</div>
+  <div class="lr" style="margin-top:4px;font-size:9px;color:rgba(200,230,240,0.3)">Drag to orbit · Scroll to zoom</div>
+</div>
+
+<!-- CONFIG MODAL -->
+<div class="cfg-panel" id="cfg-panel">
+  <h2>Mission Config</h2>
+  <div class="cfg-row"><label>Number of Drones</label><input type="number" id="cfg-n" value="20" min="4" max="100"></div>
+  <div class="cfg-row"><label>Total Steps</label><input type="number" id="cfg-steps" value="60" min="20" max="200"></div>
+  <div class="cfg-row"><label>Random Fault Probability / Step</label><input type="number" id="cfg-fp" value="0.025" step="0.005" min="0" max="0.5"></div>
+  <div class="cfg-row"><label>RNG Seed</label><input type="number" id="cfg-seed" value="42"></div>
+  <div class="cfg-row"><label>Tick Interval (ms)</label><input type="number" id="cfg-tick" value="900" min="300" max="5000" step="100"></div>
+  <div class="cfg-btns">
+    <button class="btn on" onclick="applyCfg()">▶ Start Mission</button>
+    <button class="btn" onclick="closeCfg()">Cancel</button>
+  </div>
+</div>
+
+<!-- INJECT MODAL -->
+<div class="inj-panel" id="inj-panel">
+  <h2>⚡ Inject Fault</h2>
+  <div class="cfg-row"><label>Drone ID</label><input type="number" id="inj-id" value="3" min="0"></div>
+  <div class="cfg-row"><label>Fault Type</label>
+    <select id="inj-type">
+      <option value="drift">Drift — position diverges</option>
+      <option value="comm_blackout">Comm Blackout — silent drop</option>
+      <option value="comm_degraded">Comm Degraded — weak link</option>
+      <option value="gps_noise">GPS Noise — position jitter</option>
+      <option value="battery_sudden">Battery Sudden — sharp drop</option>
+    </select>
+  </div>
+  <div class="cfg-row"><label>Duration (steps)</label><input type="number" id="inj-dur" value="6" min="1" max="20"></div>
+  <div class="cfg-btns">
+    <button class="btn red" onclick="doInject()">Inject</button>
+    <button class="btn" onclick="closeInject()">Cancel</button>
+  </div>
+</div>
+
+<script>
+// ══════════════════════════════════════════════════════════════
+// CONFIG
+// ══════════════════════════════════════════════════════════════
+const API   = 'http://localhost:8888';
+let TICK_MS = 900;
+
+// ══════════════════════════════════════════════════════════════
+// THREE.JS SCENE
+// ══════════════════════════════════════════════════════════════
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x07121a);
+scene.fog = new THREE.Fog(0x07121a, 700, 1900);
+
+const W = window.innerWidth, H = window.innerHeight;
+const camera = new THREE.PerspectiveCamera(52, W/H, 0.5, 3000);
+
+const renderer = new THREE.WebGLRenderer({ antialias:true });
+renderer.setSize(W, H);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+document.getElementById('c').appendChild(renderer.domElement);
+
+// Lighting
+scene.add(new THREE.AmbientLight(0x1a3040, 3.8));
+const sun = new THREE.DirectionalLight(0xfff0d0, 2.4);
+sun.position.set(300, 500, 200); sun.castShadow = true; scene.add(sun);
+const fill1 = new THREE.DirectionalLight(0x203050, 0.9); fill1.position.set(200, 80, -150); scene.add(fill1);
+const fill2 = new THREE.DirectionalLight(0x203050, 0.9);
+fill2.position.set(-200, 100, -100); scene.add(fill2);
+
+// ── TERRAIN ──────────────────────────────────────────────────
+function srand(s){ const x=Math.sin(s+1)*99999; return x-Math.floor(x); }
+
+const groundGeo = new THREE.PlaneGeometry(2400,2400,60,60);
+const gverts = groundGeo.attributes.position;
+for(let i=0;i<gverts.count;i++){
+  const x=gverts.getX(i), z=gverts.getZ(i);
+  const vf = Math.exp(-Math.pow((z-90)/280,2));
+  const hill = (Math.sin(x*0.009)*0.5+Math.sin(z*0.007+1)*0.5)*35*(1-vf*0.6);
+  gverts.setY(i, hill+srand(i)*8-4-12);
+}
+groundGeo.computeVertexNormals();
+const ground = new THREE.Mesh(groundGeo, new THREE.MeshLambertMaterial({color:0x2d5a27}));
+ground.rotation.x = -Math.PI/2; ground.receiveShadow=true; scene.add(ground);
+
+// Ridges
+function ridge(cx,cz,n){
+  for(let i=0;i<n;i++){
+    const ox=cx+(srand(i*7+1)-0.5)*320, oz=cz+(srand(i*7+2)-0.5)*180;
+    const h=40+srand(i*7+3)*80, r=20+srand(i*7+4)*35;
+    const m=new THREE.Mesh(new THREE.ConeGeometry(r,h,5+Math.floor(srand(i*7+5)*4)),
+      new THREE.MeshLambertMaterial({color:new THREE.Color().setHSL(0.08,0.15,0.3+srand(i*7+6)*0.15)}));
+    m.position.set(ox,-5,oz); m.castShadow=true; scene.add(m);
+  }
+}
+ridge(350,480,22); ridge(350,-300,22); ridge(-200,90,14); ridge(900,90,14);
+
+// Trees
+function tree(x,z){
+  const h=14+srand(x*0.1+z*0.07)*10;
+  const trunk=new THREE.Mesh(new THREE.CylinderGeometry(1.2,1.8,h,6),
+    new THREE.MeshLambertMaterial({color:0x5c3d1e}));
+  trunk.position.set(x,-5+h/2,z); scene.add(trunk);
+  const fl=2+Math.floor(srand(x+z)*2);
+  for(let k=0;k<fl;k++){
+    const cr=7+srand(x*0.3+z*0.2+k)*5, ch=12+srand(x*0.2+z*0.3+k)*6;
+    const c=new THREE.Mesh(new THREE.ConeGeometry(cr,ch,7),
+      new THREE.MeshLambertMaterial({color:new THREE.Color().setHSL(0.28,0.55,0.22+srand(x+z+k)*0.12)}));
+    c.position.set(x,-5+h+k*5,z); scene.add(c);
+  }
+}
+for(let i=0;i<180;i++){
+  const tx=-200+srand(i*3+1)*1100, tz=-350+srand(i*3+2)*880;
+  if(!(Math.abs(tz-90)<120&&tx>-50&&tx<750)) tree(tx,tz);
+}
+
+// River
+const rv=new THREE.Mesh(new THREE.PlaneGeometry(1400,60),
+  new THREE.MeshLambertMaterial({color:0x1a4060,transparent:true,opacity:0.55}));
+rv.rotation.x=-Math.PI/2; rv.position.set(350,-11,90); scene.add(rv);
+
+// ── WAYPOINTS ────────────────────────────────────────────────
+const WP_COLORS = [0x00ff88,0x4ab0ff,0xffdd44,0xff88cc,0xff8c00];
+const wpScene = [];
+
+function buildWaypoints(wps){
+  wpScene.forEach(o=>scene.remove(o.g));
+  wpScene.length=0;
+  if(!wps||!wps.length) return;
+  const pts = wps.map(w=>new THREE.Vector3(w.x,w.y+28,w.z));
+  const pathLine=new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints(pts),
+    new THREE.LineBasicMaterial({color:0x00d4a8,transparent:true,opacity:0.3}));
+  scene.add(pathLine);
+
+  wps.forEach((wp,i)=>{
+    const col=WP_COLORS[i]||0x00d4a8;
+    const g=new THREE.Group();
+    // pillar
+    const pil=new THREE.Mesh(new THREE.CylinderGeometry(1.5,1.5,wp.y+32,8),
+      new THREE.MeshBasicMaterial({color:col,transparent:true,opacity:0.28}));
+    pil.position.set(wp.x,(wp.y+32)/2-8,wp.z); g.add(pil);
+    // beacon sphere
+    const sph=new THREE.Mesh(new THREE.SphereGeometry(9,16,16),
+      new THREE.MeshBasicMaterial({color:col,transparent:true,opacity:0.82}));
+    sph.position.set(wp.x,wp.y+30,wp.z); g.add(sph);
+    // ground ring
+    const rng=new THREE.Mesh(new THREE.RingGeometry(14,18,32),
+      new THREE.MeshBasicMaterial({color:col,transparent:true,opacity:0.38,side:THREE.DoubleSide}));
+    rng.rotation.x=-Math.PI/2; rng.position.set(wp.x,-11,wp.z); g.add(rng);
+    // WP label sprite
+    const cv=document.createElement('canvas'); cv.width=80; cv.height=28;
+    const ctx=cv.getContext('2d'); ctx.font='bold 14px monospace';
+    ctx.fillStyle='#'+col.toString(16).padStart(6,'0');
+    ctx.fillText('WP'+i,8,20);
+    const sp=new THREE.Mesh(new THREE.PlaneGeometry(22,8),
+      new THREE.MeshBasicMaterial({map:new THREE.CanvasTexture(cv),transparent:true,depthTest:false,side:THREE.DoubleSide}));
+    sp.position.set(wp.x,wp.y+44,wp.z); sp.renderOrder=999; g.add(sp);
+    scene.add(g);
+    wpScene.push({g,sph,rng,wp,label:sp});
+  });
+}
+
+// ── DRONE MESHES ─────────────────────────────────────────────
+const COMM_COLORS=[0x4ab0ff,0x44e89a,0xcc99ff,0xffdd44,0xff88bb,0x88ddff];
+const LEADER_COL=0xff8c00;
+const FAULT_COL=0xff4455;
+const droneMeshes=[];
+const droneLabels=[];
+
+function makeDroneMesh(){
+  const g=new THREE.Group();
+  // body
+  const body=new THREE.Mesh(new THREE.BoxGeometry(5,2,5),
+    new THREE.MeshLambertMaterial({color:0xaabbcc}));
+  g.add(body);
+  // arms + rotors
+  [-1,1].forEach(sx=>[-1,1].forEach(sz=>{
+    const arm=new THREE.Mesh(new THREE.BoxGeometry(4,0.8,0.8),
+      new THREE.MeshLambertMaterial({color:0x556677}));
+    arm.position.set(sx*3.5,0,sz*3.5); arm.rotation.y=Math.PI/4; g.add(arm);
+    const rot=new THREE.Mesh(new THREE.CircleGeometry(2.8,10),
+      new THREE.MeshBasicMaterial({color:0x88bbdd,transparent:true,opacity:0.28,side:THREE.DoubleSide}));
+    rot.rotation.x=-Math.PI/2; rot.position.set(sx*5.5,1,sz*5.5); g.add(rot);
+  }));
+  // drop shadow line
+  const dl=new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0),new THREE.Vector3(0,-300,0)]),
+    new THREE.LineBasicMaterial({color:0x224433,transparent:true,opacity:0.18}));
+  g.add(dl);
+  g.castShadow=true;
+  scene.add(g);
+  return g;
+}
+
+function makeLabel(text,col){
+  const cv=document.createElement('canvas'); cv.width=128; cv.height=32;
+  const ctx=cv.getContext('2d'); ctx.font='bold 15px monospace';
+  ctx.fillStyle=col||'#ff8c00'; ctx.textAlign='center'; ctx.fillText(text,64,22);
+  const sp=new THREE.Mesh(new THREE.PlaneGeometry(26,7),
+    new THREE.MeshBasicMaterial({map:new THREE.CanvasTexture(cv),transparent:true,depthTest:false,side:THREE.DoubleSide}));
+  sp.renderOrder=999; scene.add(sp); return sp;
+}
+
+// Initialise drone meshes pool (max 100)
+for(let i=0;i<100;i++){
+  const m=makeDroneMesh();
+  m.visible=false;
+  droneMeshes.push(m);
+  const lbl=makeLabel('D-00','#ff8c00');
+  lbl.visible=false;
+  droneLabels.push(lbl);
+}
+
+// ── COMM EDGE LINES ──────────────────────────────────────────
+const edgeLines=[];
+for(let i=0;i<200;i++){
+  const l=new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0),new THREE.Vector3(1,0,0)]),
+    new THREE.LineBasicMaterial({color:0x00d4a8,transparent:true,opacity:0.12}));
+  l.visible=false; scene.add(l); edgeLines.push(l);
+}
+
+// ══════════════════════════════════════════════════════════════
+// CAMERA ORBIT
+// ══════════════════════════════════════════════════════════════
+let camTheta=0.68, camPhi=0.46, camDist=750;
+const camTarget={x:350,y:30,z:90};
+function updateCamera(){
+  camera.position.set(
+    camTarget.x+camDist*Math.sin(camPhi)*Math.sin(camTheta),
+    camTarget.y+camDist*Math.cos(camPhi),
+    camTarget.z+camDist*Math.sin(camPhi)*Math.cos(camTheta));
+  camera.lookAt(camTarget.x,camTarget.y,camTarget.z);
+}
+updateCamera();
+
+let isDragging=false,lmx=0,lmy=0;
+renderer.domElement.addEventListener('mousedown',e=>{if(e.button===0){isDragging=true;lmx=e.clientX;lmy=e.clientY;}});
+window.addEventListener('mouseup',()=>isDragging=false);
+window.addEventListener('mousemove',e=>{
+  if(!isDragging)return;
+  camTheta-=(e.clientX-lmx)*0.005;
+  camPhi=Math.max(0.08,Math.min(Math.PI*0.47,camPhi+(e.clientY-lmy)*0.005));
+  lmx=e.clientX; lmy=e.clientY; updateCamera();
+});
+renderer.domElement.addEventListener('wheel',e=>{
+  camDist=Math.max(180,Math.min(1500,camDist+e.deltaY*0.55));
+  updateCamera();
+},{passive:true});
+
+// ══════════════════════════════════════════════════════════════
+// SMOOTH DRONE INTERPOLATION
+// ══════════════════════════════════════════════════════════════
+// droneRender[i] = {x,y,z, targetX,targetY,targetZ, ...}
+const droneRender=[];
+let lastState=null;
+
+function syncRenderTargets(state){
+  const n=state.drones.length;
+  while(droneRender.length<n) droneRender.push({x:0,y:0,z:0,tx:0,ty:0,tz:0,phase:Math.random()*Math.PI*2,initialised:false});
+  state.drones.forEach((d,i)=>{
+    const r=droneRender[i];
+    if(!r.initialised){
+      // First time — snap directly to position
+      r.x=d.x; r.y=d.y; r.z=d.z;
+      r.tx=d.x; r.ty=d.y; r.tz=d.z;
+      r.initialised=true;
+      return;
+    }
+    // Teleport detection: if server position jumped > 120 units from current render pos,
+    // snap immediately instead of lerping backward (happens on reset or new mission)
+    const dx=d.x-r.x, dy=d.y-r.y, dz=d.z-r.z;
+    const distSq=dx*dx+dy*dy+dz*dz;
+    if(distSq>120*120){
+      r.x=d.x; r.y=d.y; r.z=d.z;
+    }
+    r.tx=d.x; r.ty=d.y; r.tz=d.z;
+  });
+  lastState=state;
+}
+
+// ══════════════════════════════════════════════════════════════
+// HUD UPDATE FROM STATE
+// ══════════════════════════════════════════════════════════════
+const CC_CSS=['#4ab0ff','#44e89a','#cc99ff','#ffdd44','#ff88bb','#88ddff'];
+
+function updateHUD(state){
+  const gl=state.drones.find(d=>d.id===state.global_leader_id);
+  document.getElementById('ui-gl-id').textContent   = gl ? `DRONE ${String(state.global_leader_id).padStart(2,'0')}` : '—';
+  document.getElementById('ui-gl-score').textContent= gl ? `PageRank ${gl.pagerank.toFixed(5)} · Batt ${(gl.battery*100).toFixed(1)}%` : '';
+
+  // Community leaders
+  let html='<div class="sec-lbl">Community Leaders</div>';
+  state.leaders.forEach(l=>{
+    const css=CC_CSS[+l.community_id]||'#aaa';
+    html+=`<div class="cl-card" style="border-color:${css}44">
+      <div class="cl-comm" style="color:${css}">COMMUNITY ${l.community_id}</div>
+      <div class="cl-id">DRONE ${String(l.leader_drone_id).padStart(2,'0')}</div>
+      <div class="cl-meta">PR ${l.pagerank.toFixed(5)} · ${l.community_size} drones</div>
+    </div>`;
+  });
+  document.getElementById('ui-comm-block').innerHTML=html;
+
+  // Mission path — highlight reached WPs
+  const maxWP=state.drones.length>0?Math.max(...state.drones.map(d=>d.wp_target)):0;
+  const wpHtml=(state.waypoints||[]).map((_,i)=>`<span style="color:${i<maxWP?'#00d4a8':i===maxWP?'#ffcc44':'rgba(200,230,240,0.3)'}">WP${i}${i<(state.waypoints.length-1)?' → ':''}</span>`).join('');
+  document.getElementById('ui-mission-path').innerHTML=wpHtml;
+
+  document.getElementById('ui-net').innerHTML=
+    `Algorithm: <span style="color:#00d4a8">${state.community_algo}+${state.centrality_algo}</span><br>`+
+    `Modularity: <span style="color:#00d4a8">${state.modularity.toFixed(4)}</span><br>`+
+    `Communities: <span style="color:#4ab0ff">${state.leaders.length}</span>`;
+
+  const faulty=state.drones.filter(d=>d.fault!=='healthy').length;
+  const avgBatt=state.drones.length?state.drones.reduce((s,d)=>s+d.battery,0)/state.drones.length:0;
+  document.getElementById('ui-active').textContent   = state.n_drones-faulty;
+  document.getElementById('ui-faulty').textContent   = faulty;
+  document.getElementById('ui-comm-n').textContent   = state.leaders.length;
+  document.getElementById('ui-mod').textContent      = state.modularity.toFixed(4);
+  document.getElementById('ui-batt').textContent     = (avgBatt*100).toFixed(1)+'%';
+  document.getElementById('ui-phase').textContent    = state.phase==='complete'?'✓ COMPLETE':'RUNNING';
+  document.getElementById('step-badge').textContent  = `Step ${state.step} / ${state.total_steps}`;
+}
+
+function pushEventLog(state){
+  const container=document.getElementById('ui-event-log');
+  const events=[];
+  // fault events from this tick
+  if(state.fault_log) state.fault_log.slice(-8).forEach(e=>{
+    let cls=e.event||'fault_detected';
+    if(e.fault_type==='comm_blackout') cls='comm_blackout';
+    let text=`D-${String(e.drone_id).padStart(2,'0')} · ${(e.event||'').replace('_',' ').toUpperCase()} · ${(e.fault_type||'').replace('_',' ')}`;
+    if(e.new_leader!==undefined) text+=` → D-${String(e.new_leader).padStart(2,'0')}`;
+    events.push({cls,text,step:e.step});
+  });
+  if(state.waypoint_reached_log) state.waypoint_reached_log.slice(-4).forEach(e=>{
+    events.push({cls:'waypoint',text:`D-${String(e.drone_id).padStart(2,'0')} → WP${e.waypoint} reached`,step:e.step});
+  });
+  events.sort((a,b)=>b.step-a.step);
+  container.innerHTML=events.slice(0,14).map(e=>`<div class="fe ${e.cls}">${e.text}<span style="float:right;opacity:.4">s${e.step}</span></div>`).join('');
+}
+
+// ══════════════════════════════════════════════════════════════
+// 3-D SCENE UPDATE FROM STATE
+// ══════════════════════════════════════════════════════════════
+function updateScene(state){
+  const n=state.drones.length;
+
+  // Hide unused meshes
+  for(let i=n;i<droneMeshes.length;i++){
+    droneMeshes[i].visible=false;
+    droneLabels[i].visible=false;
+  }
+
+  let edgeIdx=0;
+  const leaders=state.leaders.map(l=>l.leader_drone_id);
+  const glId=state.global_leader_id;
+
+  state.drones.forEach((d,i)=>{
+    const g=droneMeshes[i];
+    const lbl=droneLabels[i];
+    g.visible=true;
+
+    const isGlobal=d.id===glId;
+    const isCommLeader=leaders.includes(d.id)&&!isGlobal;
+    const isAnyLeader=isGlobal||isCommLeader;
+    const isFaulty=d.fault!=='healthy';
+
+    // Global leader → orange, community leader → white, fault → red, normal → community color
+    let col=isFaulty?FAULT_COL:isGlobal?LEADER_COL:isCommLeader?0xffffff:(COMM_COLORS[d.community]||COMM_COLORS[0]);
+    const size=isGlobal?1.6:isCommLeader?1.2:isFaulty?0.85:0.72;
+
+    g.children[0].material.color.setHex(col);
+    g.scale.setScalar(size);
+
+    // Only show labels for leaders
+    if(isAnyLeader){
+      lbl.visible=true;
+      const cv=document.createElement('canvas'); cv.width=128; cv.height=32;
+      const ctx=cv.getContext('2d'); ctx.font='bold 15px monospace';
+      ctx.fillStyle=isGlobal?'#ff8c00':'#ffffff';
+      ctx.textAlign='center'; ctx.fillText(`D-${String(d.id).padStart(2,'0')}`,64,22);
+      lbl.material.map=new THREE.CanvasTexture(cv);
+      lbl.material.needsUpdate=true;
+    } else {
+      lbl.visible=false;
+    }
+
+    // Leader–leader edges
+    if(isAnyLeader){
+      leaders.forEach(lid=>{
+        if(lid<=d.id) return;
+        const od=state.drones.find(x=>x.id===lid);
+        if(!od||edgeIdx>=edgeLines.length) return;
+        const el=edgeLines[edgeIdx++];
+        const pos=el.geometry.attributes.position;
+        pos.setXYZ(0,d.x,d.y,d.z); pos.setXYZ(1,od.x,od.y,od.z);
+        pos.needsUpdate=true; el.visible=true;
+      });
+    }
+  });
+  // Hide unused edge lines
+  for(;edgeIdx<edgeLines.length;edgeIdx++) edgeLines[edgeIdx].visible=false;
+}
+
+// ══════════════════════════════════════════════════════════════
+// ANIMATION LOOP
+// ══════════════════════════════════════════════════════════════
+const LERP=0.06;  // smooth interpolation — slow glide
+let frameT=0;
+
+function animate(now){
+  requestAnimationFrame(animate);
+  const dt=Math.min((now-(animate._last||now))/1000,0.05);
+  animate._last=now;
+  frameT+=dt;
+
+  // Smooth drone positions
+  if(lastState){
+    const n=lastState.drones.length;
+    for(let i=0;i<n;i++){
+      const r=droneRender[i]; if(!r) continue;
+      const d=lastState.drones[i];
+
+      if(d.fault==='comm_blackout' || d.fault==='battery_sudden'){
+        // Completely frozen — snap target to current server pos, no movement
+        r.tx=d.x; r.ty=d.y; r.tz=d.z;
+        r.x=d.x; r.y=d.y; r.z=d.z;
+      } else if(d.fault==='drift'){
+        // Drift: follow server position quickly (already moving away on server)
+        r.x+=(r.tx-r.x)*0.18;
+        r.y+=(r.ty-r.y)*0.18;
+        r.z+=(r.tz-r.z)*0.18;
+      } else {
+        // Normal / degraded / gps_noise — smooth glide
+        r.x+=(r.tx-r.x)*LERP;
+        r.y+=(r.ty-r.y)*LERP;
+        r.z+=(r.tz-r.z)*LERP;
+      }
+
+      // Hover bob — frozen drones still bob gently (they're hovering in place)
+      const hoverAmp = (d.fault==='comm_blackout'||d.fault==='battery_sudden') ? 0.6 : 1.6;
+      const hover=Math.sin(frameT*1.0+r.phase)*hoverAmp;
+      droneMeshes[i].position.set(r.x, r.y+hover, r.z);
+      droneMeshes[i].rotation.y+=0.007;
+      if(droneLabels[i].visible){
+        droneLabels[i].position.set(r.x, r.y+hover+13, r.z);
+        droneLabels[i].lookAt(camera.position);
+      }
+    }
+  }
+
+  // WP beacon animation
+  wpScene.forEach((o,i)=>{
+    o.sph.position.y=o.wp.y+30+Math.sin(frameT*1.2+i)*3;
+    o.rng.rotation.z+=0.007;
+    if(o.label) o.label.lookAt(camera.position);
+  });
+
+  renderer.render(scene,camera);
+}
+requestAnimationFrame(animate);
+
+// ══════════════════════════════════════════════════════════════
+// SERVER POLLING
+// ══════════════════════════════════════════════════════════════
+let playing=true;
+let tickTimer=null;
+let serverOk=false;
+let missionAlgo={community:'louvain',centrality:'pagerank'};
+let missionConfig={n_drones:20,total_steps:60,random_fault_prob:0.025,seed:42};
+
+async function api(path,method='GET',body=null){
+  const opts={method,headers:{'Content-Type':'application/json'}};
+  if(body) opts.body=JSON.stringify(body);
+  const r=await fetch(API+path,opts);
+  if(!r.ok) throw new Error(`${r.status} ${await r.text()}`);
+  return r.json();
+}
+
+function setStatus(ok){
+  serverOk=ok;
+  const el=document.getElementById('server-status');
+  el.className='server-status '+(ok?'ok':'err');
+  el.textContent=ok?'● Server Connected':'✗ Server Offline';
+  document.getElementById('pulse').style.background=ok?'#00d4a8':'#ff4455';
+}
+
+async function startMission(){
+  try{
+    const state=await api('/sim/start','POST',{
+      n_drones:     missionConfig.n_drones,
+      total_steps:  missionConfig.total_steps,
+      random_fault_prob: missionConfig.random_fault_prob,
+      seed:         missionConfig.seed,
+      community_algo:  missionAlgo.community,
+      centrality_algo: missionAlgo.centrality,
+    });
+    setStatus(true);
+    // Reset render positions so LERP starts fresh from new spawn points
+    droneRender.forEach(r=>{ r.initialised=false; });
+    buildWaypoints(state.waypoints);
+    syncRenderTargets(state);
+    updateScene(state);
+    updateHUD(state);
+    pushEventLog(state);
+    scheduleTick();
+  } catch(e){
+    setStatus(false);
+    console.error('startMission error:',e);
+    setTimeout(startMission,3000);
+  }
+}
+
+async function doTick(){
+  if(!playing) return;
+  try{
+    const state=await api('/sim/tick','POST');
+    setStatus(true);
+    syncRenderTargets(state);
+    updateScene(state);
+    updateHUD(state);
+    pushEventLog(state);
+    if(state.phase==='complete'){
+      document.getElementById('ui-phase').textContent='✓ COMPLETE';
+      stopTick();
+    } else {
+      scheduleTick();
+    }
+  } catch(e){
+    setStatus(false);
+    console.error('tick error:',e);
+    scheduleTick();
+  }
+}
+
+function scheduleTick(){
+  clearTimeout(tickTimer);
+  tickTimer=setTimeout(doTick,TICK_MS);
+}
+function stopTick(){ clearTimeout(tickTimer); tickTimer=null; }
+
+// ══════════════════════════════════════════════════════════════
+// CONTROLS
+// ══════════════════════════════════════════════════════════════
+function togglePlay(){
+  playing=!playing;
+  const btn=document.getElementById('btn-pp');
+  btn.textContent=playing?'⏸ Pause':'▶ Play';
+  btn.classList.toggle('on',playing);
+  if(playing) scheduleTick();
+}
+
+async function resetMission(){
+  stopTick();
+  await startMission();
+}
+
+function switchAlgo(comm,cent,el){
+  missionAlgo={community:comm,centrality:cent};
+  document.querySelectorAll('.ab').forEach(b=>b.classList.remove('on'));
+  el.classList.add('on');
+  // Restart with new algo
+  resetMission();
+}
+
+function showCfg(){
+  document.getElementById('cfg-n').value=missionConfig.n_drones;
+  document.getElementById('cfg-steps').value=missionConfig.total_steps;
+  document.getElementById('cfg-fp').value=missionConfig.random_fault_prob;
+  document.getElementById('cfg-seed').value=missionConfig.seed;
+  document.getElementById('cfg-tick').value=TICK_MS;
+  document.getElementById('cfg-panel').style.display='block';
+}
+function closeCfg(){ document.getElementById('cfg-panel').style.display='none'; }
+function applyCfg(){
+  missionConfig={
+    n_drones:    +document.getElementById('cfg-n').value,
+    total_steps: +document.getElementById('cfg-steps').value,
+    random_fault_prob: +document.getElementById('cfg-fp').value,
+    seed:        +document.getElementById('cfg-seed').value,
+  };
+  TICK_MS=+document.getElementById('cfg-tick').value;
+  closeCfg();
+  resetMission();
+}
+
+function showInject(){ document.getElementById('inj-panel').style.display='block'; }
+function closeInject(){ document.getElementById('inj-panel').style.display='none'; }
+async function doInject(){
+  const id=+document.getElementById('inj-id').value;
+  const ft=document.getElementById('inj-type').value;
+  const dur=+document.getElementById('inj-dur').value;
+  try{ await api('/sim/inject_fault','POST',{drone_id:id,fault_type:ft,duration:dur}); }
+  catch(e){ console.error(e); }
+  closeInject();
+}
+
+// ── RESIZE ───────────────────────────────────────────────────
+window.addEventListener('resize',()=>{
+  camera.aspect=window.innerWidth/window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth,window.innerHeight);
+});
+
+// ══════════════════════════════════════════════════════════════
+// BOOT
+// ══════════════════════════════════════════════════════════════
+startMission();
+</script>
+</body>
+</html>

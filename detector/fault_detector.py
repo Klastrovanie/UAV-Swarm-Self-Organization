@@ -34,21 +34,48 @@ import pandas as pd
 def get_community_leaders(
     community_groups: pd.DataFrame,
     pagerank_scores: pd.DataFrame,
+    drone_faults: dict[int, str] | None = None,
+    battery_threshold: float = 0.70,
+    drone_batteries: dict[int, float] | None = None,
 ) -> pd.DataFrame:
     """
     Select the drone with the highest PageRank score in each community.
-    Singleton (isolated) communities report their sole member as leader
-    with whatever pagerank they have (0.0 for restored isolated nodes).
+
+    Excludes permanently faulted drones (drift, comm_blackout, battery_sudden)
+    and drones with battery below threshold from leadership.
+    Falls back to any available drone if all are faulted.
     """
+    PERM_FAULTS = {"drift", "comm_blackout", "battery_sudden"}
+
     merged = community_groups.merge(
         pagerank_scores[["vertex", "pagerank"]],
         on="vertex",
         how="left",
     )
+    merged["pagerank"] = merged["pagerank"].fillna(0.0)
+
+    # Mark ineligible drones
+    def is_eligible(vertex):
+        vid = int(vertex)
+        if drone_faults and drone_faults.get(vid, "healthy") in PERM_FAULTS:
+            return False
+        if drone_batteries and drone_batteries.get(vid, 1.0) < battery_threshold:
+            return False
+        return True
+
+    merged["eligible"] = merged["vertex"].apply(is_eligible)
+
+    def pick_leader(group):
+        eligible = group[group["eligible"]]
+        pool = eligible if not eligible.empty else group
+        return pool.loc[pool["pagerank"].idxmax()]
+
     leaders = (
-        merged.loc[merged.groupby("CommunityGroupID")["pagerank"].idxmax()]
+        merged.groupby("CommunityGroupID")
+        .apply(pick_leader)
         .reset_index(drop=True)
         .rename(columns={"vertex": "leader_vertex", "pagerank": "leader_pagerank"})
+        [["CommunityGroupID", "leader_vertex", "leader_pagerank"]]
         .sort_values("CommunityGroupID")
     )
     return leaders
