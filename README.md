@@ -6,6 +6,9 @@
 
 **Decentralised self-organization framework for UAV swarms**, powered by NVIDIA RAPIDS cuGraph.
 
+**First Public Release:** 2026-06-05  
+**Last Updated:** 2026-06-09
+
 When part of a swarm fails, the remaining healthy drones should reorganise themselves — without intervention from a ground station — into coherent sub-clusters, each with an elected leader that can act as a relay or sub-mission coordinator. This project provides that self-organization layer:
 
 1. **Fault detection** — anomalous drones are identified by their communication graph topology (isolated nodes + statistical PageRank outliers), not by direct telemetry inspection.
@@ -321,6 +324,166 @@ pytest tests/ -v
 ```
 
 Tests cover the simulator and do not require a GPU.
+
+---
+ 
+# What's New in v2.0.0
+ 
+> Released 2026-06-09
+ 
+v2.0.0 adds a **real-time live simulation API** and a **3D WebGL visualizer**, turning the batch pipeline into an interactive mission demo. The core simulation and graph engine are unchanged — all new additions are strictly additive.
+- server.py: added
+- drone_swarm_3d.html: added
+- some other files: modified (see commit logs)
+ 
+---
+ 
+## New: Algorithm selection (Louvain / Leiden + PageRank / HITS)
+ 
+`graph_engine.py` now accepts two parameters:
+ 
+```python
+engine = GraphEngine(cfg, community_algo="leiden", centrality_algo="hits")
+```
+ 
+| Community | Centrality | Characteristics |
+|---|---|---|
+| `louvain` | `pagerank` | Default — fast, general purpose |
+| `louvain` | `hits` | Fast clusters + relay-aware leaders (Hub score) |
+| `leiden` | `pagerank` | Stable clusters + classic ranking |
+| `leiden` | `hits` | Best quality — stable clusters + relay-aware leaders |
+ 
+**HITS** returns `hub_score` (best relay/broadcaster) and `authority_score` (most trusted receiver) separately. Leader election uses `hub_score`. A `pagerank` alias column is always present so `fault_detector.py` works unchanged regardless of algorithm.
+ 
+---
+ 
+## New: Fault model — permanent vs temporary
+ 
+Faults are now classified by recoverability:
+ 
+| Type | Recovery | Behaviour |
+|---|---|---|
+| `drift` | ❌ Permanent | Drifts away from swarm indefinitely |
+| `comm_blackout` | ❌ Permanent | Frozen in place, no edges ever |
+| `battery_sudden` | ❌ Permanent | Battery drop is irreversible |
+| `comm_degraded` | ✅ Temporary (3–7 steps) | Signal quality recovers |
+| `gps_noise` | ✅ Temporary (3–7 steps) | Sensor noise clears |
+ 
+Temporary faults reflect real-world RF interference patterns — the same drone may degrade and recover multiple times during a mission.
+ 
+---
+ 
+## New: Fault-aware leader election
+ 
+`fault_detector.get_community_leaders()` now accepts `drone_faults` and `drone_batteries` maps and excludes permanently faulted or low-battery drones from leadership candidacy:
+ 
+```python
+community_leaders = get_community_leaders(
+    community_groups, centrality_scores,
+    drone_faults=fault_map,
+    drone_batteries=battery_map,
+    battery_threshold=0.70,
+)
+```
+ 
+A safety net guarantees at least one leader always exists even if all candidates are faulted.
+ 
+---
+ 
+## New: Leader battery drain + automatic stepdown
+ 
+Leaders consume battery at 2× the normal rate (they handle relay traffic). When a leader's battery drops below 70%, it steps down and the next highest-ranked healthy drone in the same community is automatically elected — logged as a `leader_stepdown` event.
+ 
+Leader count is capped at `max(2, min(8, sqrt(n)))` to prevent explosion with large swarms.
+ 
+---
+ 
+## New: Live simulation API (`server.py`)
+ 
+A FastAPI server exposes the simulation as a step-by-step stateful API. The HTML visualizer polls it every tick.
+ 
+```bash
+# On the GPU server (EC2 or local)
+python server.py
+# → http://0.0.0.0:8000
+# → http://localhost:8000/docs  (Swagger UI)
+```
+ 
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/sim/start` | Initialise a new mission |
+| `POST` | `/sim/tick` | Advance one step, run graph analysis, return full state |
+| `POST` | `/sim/inject_fault` | Manually inject a fault on a specific drone |
+| `POST` | `/sim/reset` | Reset to same config |
+| `GET` | `/sim/state` | Current state without advancing |
+| `GET` | `/health` | Liveness check (includes `gpu_available`) |
+| `GET` | `/algorithms` | Supported algorithm combinations |
+ 
+**No GPU required to start the server.** Without cuGraph, graph analysis falls back to a CPU k-means + iterative PageRank approximation automatically.
+ 
+---
+ 
+## New: 3D Real-Time Visualizer (`drone_swarm_3d.html`)
+ 
+A standalone HTML file (no build step) that connects to the live API and renders the swarm in 3D via Three.js.
+ 
+**Features:**
+- 5-waypoint mission over procedural terrain (trees, ridges, valley, river)
+- Per-community drone colouring — only leaders show ID labels
+- 🟠 Orange = global leader, ⬜ White = community leader, 🔴 Pink/Red = fault
+- Smooth LERP interpolation between server ticks (teleport detection included)
+- ⚙ Config panel — drones, steps, fault probability, tick speed, algorithm
+- ⚡ Inject Fault button — target any drone with any fault type
+- Event log panel — fault detected / recovered / leader stepdown / waypoint reached
+- Mouse drag to orbit, scroll to zoom
+**Project structure additions (v2.0.0):**
+ 
+```
+UAV-Swarm-Self-Organization/
+├── server.py                 # FastAPI live simulation API  ← NEW
+├── drone_swarm_3d.html       # Three.js 3D visualizer       ← NEW
+├── port-mapping.sh           # SSH tunnel helper (local PC) ← NEW
+└── run-local-server.sh       # Local HTML server (local PC) ← NEW
+```
+ 
+---
+ 
+## Running the real-time demo
+ 
+**Step 1 — Start the API server (GPU machine / EC2)**
+ 
+```bash
+cd ~/UAV-Swarm-Self-Organization
+python server.py
+```
+ 
+**Step 2 — SSH tunnel (local PC, if server is remote)**
+ 
+```bash
+bash port-mapping.sh
+# Forwards localhost:8888 → EC2:8000
+```
+ 
+**Step 3 — Serve the HTML locally**
+ 
+```bash
+bash run-local-server.sh
+# Serves on http://localhost:3000
+```
+ 
+**Step 4 — Open in browser**
+ 
+```
+http://localhost:3000/drone_swarm_3d.html
+```
+ 
+Top bar shows **● Server Connected** when the API is reachable. Use ⚙ Config to set drone count, fault probability, and algorithm before starting.
+
+## Live Demo Video Recording:
+[![UAV Swarm Self-Organization Demo](https://img.youtube.com/vi/h7SSGxUz5Nc/0.jpg)](https://youtu.be/h7SSGxUz5Nc)
+ 
+https://youtu.be/h7SSGxUz5Nc
+
 
 ---
 
