@@ -480,9 +480,9 @@ http://localhost:3000/drone_swarm_3d.html
 Top bar shows **● Server Connected** when the API is reachable. Use ⚙ Config to set drone count, fault probability, and algorithm before starting.
 
 ## Live Demo Video Recording:
-[![UAV Swarm Self-Organization Demo](https://img.youtube.com/vi/h7SSGxUz5Nc/0.jpg)](https://youtu.be/h7SSGxUz5Nc)
+[![UAV Swarm Self-Organization Demo](https://img.youtube.com/vi/B0FfCWOXL8M/0.jpg)](https://youtu.be/B0FfCWOXL8M)
 
-https://www.youtube.com/watch?v=B0FfCWOXL8M 
+https://youtu.be/B0FfCWOXL8M
 
 
 ---
